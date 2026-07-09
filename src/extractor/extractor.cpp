@@ -15,6 +15,7 @@
 #include "extractor/restriction_graph.hpp"
 #include "extractor/restriction_parser.hpp"
 #include "extractor/scripting_environment.hpp"
+#include "extractor/serialization.hpp"
 #include "extractor/string_table.hpp"
 #include "extractor/turn_path_filter.hpp"
 #include "extractor/way_restriction_map.hpp"
@@ -642,6 +643,16 @@ Extractor::ParsedOSMData Extractor::ParseOSMData(ScriptingEnvironment &scripting
                                         storage::tar::FileWriter::GenerateFingerprint);
         storage::serialization::write(writer, "/extractor/nodes", extraction_containers.used_nodes);
         storage::serialization::write(writer, "/extractor/edges", extraction_containers.used_edges);
+        // Complete the raw node-based-graph interface: the edges' annotation ids
+        // reference the pre-compression annotation table, and turn restrictions
+        // and obstacles are otherwise consumed in-memory only. All node ids below
+        // are internal pre-compression NodeIDs, the same space as /extractor/nodes.
+        storage::serialization::write(
+            writer, "/extractor/annotations", extraction_containers.all_edges_annotation_data_list);
+        serialization::write(
+            writer, "/extractor/turn_restrictions", extraction_containers.turn_restrictions);
+        storage::serialization::write(
+            writer, "/extractor/obstacles", scripting_environment.m_obstacle_map.data());
     }
 
     return ParsedOSMData{std::move(turn_lane_map),

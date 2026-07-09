@@ -199,6 +199,107 @@ inline void read(storage::tar::FileReader &reader,
     read(buffer_reader, conditional_penalties);
 }
 
+inline void write(storage::io::BufferWriter &writer, const TurnPath &turn_path)
+{
+    writer.WriteFrom(static_cast<std::uint8_t>(turn_path.Type()));
+    if (turn_path.Type() == TurnPathType::VIA_NODE_TURN_PATH)
+    {
+        const auto &path = turn_path.AsViaNodePath();
+        writer.WriteFrom(path.from);
+        writer.WriteFrom(path.via);
+        writer.WriteFrom(path.to);
+    }
+    else
+    {
+        const auto &path = turn_path.AsViaWayPath();
+        writer.WriteFrom(path.from);
+        storage::serialization::write(writer, path.via);
+        writer.WriteFrom(path.to);
+    }
+}
+
+inline void read(storage::io::BufferReader &reader, TurnPath &turn_path)
+{
+    std::uint8_t type = 0;
+    reader.ReadInto(type);
+    if (type == TurnPathType::VIA_NODE_TURN_PATH)
+    {
+        ViaNodePath path;
+        reader.ReadInto(path.from);
+        reader.ReadInto(path.via);
+        reader.ReadInto(path.to);
+        turn_path.node_or_way = path;
+    }
+    else
+    {
+        ViaWayPath path;
+        reader.ReadInto(path.from);
+        storage::serialization::read(reader, path.via);
+        reader.ReadInto(path.to);
+        turn_path.node_or_way = path;
+    }
+}
+
+inline void write(storage::io::BufferWriter &writer, const TurnRestriction &restriction)
+{
+    write(writer, restriction.turn_path);
+    writer.WriteFrom(static_cast<std::uint8_t>(restriction.is_only));
+    writer.WriteElementCount64(restriction.condition.size());
+    for (const auto &c : restriction.condition)
+    {
+        writer.WriteFrom(c.modifier);
+        storage::serialization::write(writer, c.times);
+        storage::serialization::write(writer, c.weekdays);
+        storage::serialization::write(writer, c.monthdays);
+    }
+}
+
+inline void read(storage::io::BufferReader &reader, TurnRestriction &restriction)
+{
+    read(reader, restriction.turn_path);
+    std::uint8_t is_only = 0;
+    reader.ReadInto(is_only);
+    restriction.is_only = is_only != 0;
+    const auto num_conditions = reader.ReadElementCount64();
+    restriction.condition.resize(num_conditions);
+    for (auto &c : restriction.condition)
+    {
+        reader.ReadInto(c.modifier);
+        storage::serialization::read(reader, c.times);
+        storage::serialization::read(reader, c.weekdays);
+        storage::serialization::read(reader, c.monthdays);
+    }
+}
+
+inline void write(storage::tar::FileWriter &writer,
+                  const std::string &name,
+                  const std::vector<TurnRestriction> &restrictions)
+{
+    storage::io::BufferWriter buffer_writer;
+    buffer_writer.WriteElementCount64(restrictions.size());
+    for (const auto &restriction : restrictions)
+    {
+        write(buffer_writer, restriction);
+    }
+    storage::serialization::write(writer, name, buffer_writer.GetBuffer());
+}
+
+inline void read(storage::tar::FileReader &reader,
+                 const std::string &name,
+                 std::vector<TurnRestriction> &restrictions)
+{
+    std::string buffer;
+    storage::serialization::read(reader, name, buffer);
+
+    storage::io::BufferReader buffer_reader{buffer};
+    const auto num_restrictions = buffer_reader.ReadElementCount64();
+    restrictions.resize(num_restrictions);
+    for (auto &restriction : restrictions)
+    {
+        read(buffer_reader, restriction);
+    }
+}
+
 template <storage::Ownership Ownership>
 inline void write(storage::tar::FileWriter &writer,
                   const std::string &name,

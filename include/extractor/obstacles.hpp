@@ -124,6 +124,14 @@ class ObstacleMap
     using OsmFromToObstacle = std::tuple<OSMNodeID, OSMNodeID, Obstacle>;
 
   public:
+    struct InternalObstacle
+    {
+        NodeID to;
+        NodeID from;
+        Obstacle obstacle;
+        bool operator<(const InternalObstacle &other) const { return to < other.to; }
+    };
+
     ObstacleMap() = default;
 
     // Insert an obstacle using the OSM node id.
@@ -206,15 +214,11 @@ class ObstacleMap
     // compression with the leading node of the leading node.
     void compress(NodeID from, NodeID delendus, NodeID to);
 
-  private:
-    struct InternalObstacle
-    {
-        NodeID to;
-        NodeID from;
-        Obstacle obstacle;
-        bool operator<(const InternalObstacle &other) const { return to < other.to; }
-    };
+    // Read-only access to all obstacles with internal node ids.
+    // Valid after fixupNodes(); sorted by 'to' after sort().
+    const std::vector<InternalObstacle> &data() const { return obstacles; }
 
+  private:
     using ObstacleIter = std::vector<InternalObstacle>::iterator;
     using ConstObstacleIter = std::vector<InternalObstacle>::const_iterator;
 
