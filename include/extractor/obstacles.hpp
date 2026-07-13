@@ -130,6 +130,16 @@ class ObstacleMap
         NodeID from;
         Obstacle obstacle;
         bool operator<(const InternalObstacle &other) const { return to < other.to; }
+
+        // Deserialization (--load-nbg) resizes vectors of these before
+        // reading the bytes back in.
+        InternalObstacle() : to(SPECIAL_NODEID), from(SPECIAL_NODEID), obstacle(Obstacle::Type::None)
+        {
+        }
+        InternalObstacle(NodeID to, NodeID from, const Obstacle &obstacle)
+            : to(to), from(from), obstacle(obstacle)
+        {
+        }
     };
 
     ObstacleMap() = default;

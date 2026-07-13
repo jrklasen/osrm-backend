@@ -87,6 +87,7 @@ struct ExtractorConfig final : storage::IOConfig
     bool parse_conditionals = false;
     bool use_locations_cache = true;
     bool dump_nbg_graph = false;
+    bool load_nbg = false;
 };
 } // namespace osrm::extractor
 

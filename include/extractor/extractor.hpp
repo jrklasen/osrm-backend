@@ -75,6 +75,11 @@ class Extractor
     ParsedOSMData ParseOSMData(ScriptingEnvironment &scripting_environment,
                                const unsigned number_of_threads);
 
+    // Deserializes the state ParseOSMData would have produced from the
+    // <input>.osrm.nbg dump (see --dump-nbg-graph) plus .osrm.tls, so the
+    // rest of run() proceeds on externally produced road data.
+    ParsedOSMData LoadNBGData(ScriptingEnvironment &scripting_environment);
+
     EdgeID BuildEdgeExpandedGraph(
         // input data
         const util::NodeBasedDynamicGraph &node_based_graph,

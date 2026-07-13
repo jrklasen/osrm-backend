@@ -81,6 +81,12 @@ return_code parseArguments(int argc,
             ->implicit_value(true)
             ->default_value(false),
         "Dump raw node-based graph to *.osrm file for debug purposes.")(
+        "load-nbg",
+        boost::program_options::bool_switch(&extractor_config.load_nbg)
+            ->implicit_value(true)
+            ->default_value(false),
+        "Load the raw node-based graph from <input>.osrm.nbg instead of parsing OSM data; "
+        "the input positional argument is the file base path.")(
         "output,o",
         boost::program_options::value<std::filesystem::path>(&extractor_config.output_path),
         "Output base path for generated files (default: derived from input file name)");

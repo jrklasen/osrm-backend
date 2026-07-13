@@ -198,7 +198,9 @@ int Extractor::run(ScriptingEnvironment &scripting_environment)
     tbb::global_control gc(tbb::global_control::max_allowed_parallelism,
                            config.requested_num_threads);
 
-    auto parsed_osm_data = ParseOSMData(scripting_environment, number_of_threads);
+    auto parsed_osm_data = config.load_nbg
+                               ? LoadNBGData(scripting_environment)
+                               : ParseOSMData(scripting_environment, number_of_threads);
 
     // Transform the node-based graph that OSM is based on into an edge-based graph
     // that is better for routing.  Every edge becomes a node, and every valid
@@ -662,6 +664,134 @@ Extractor::ParsedOSMData Extractor::ParseOSMData(ScriptingEnvironment &scripting
                          std::move(osm_node_ids),
                          std::move(extraction_containers.used_edges),
                          std::move(extraction_containers.all_edges_annotation_data_list)};
+}
+
+Extractor::ParsedOSMData Extractor::LoadNBGData(ScriptingEnvironment &scripting_environment)
+{
+    TIMER_START(loading);
+    const auto nbg_path = config.GetPath(".osrm.nbg").string();
+    util::Log() << "Loading the raw node-based graph from " << nbg_path;
+
+    std::vector<QueryNode> used_nodes;
+    std::vector<NodeBasedEdge> used_edges;
+    std::vector<NodeBasedEdgeAnnotation> annotation_data;
+    std::vector<TurnRestriction> turn_restrictions;
+    std::vector<ObstacleMap::InternalObstacle> obstacles;
+    std::string maneuver_buffer;
+    {
+        storage::tar::FileReader reader(nbg_path, storage::tar::FileReader::VerifyFingerprint);
+        storage::serialization::read(reader, "/extractor/nodes", used_nodes);
+        storage::serialization::read(reader, "/extractor/edges", used_edges);
+        storage::serialization::read(reader, "/extractor/annotations", annotation_data);
+        serialization::read(reader, "/extractor/turn_restrictions", turn_restrictions);
+        storage::serialization::read(reader, "/extractor/obstacles", obstacles);
+        storage::serialization::read(reader, "/extractor/maneuver_overrides", maneuver_buffer);
+    }
+
+    // Obstacles arrive with internal pre-compression node ids.
+    for (const auto &obstacle : obstacles)
+    {
+        scripting_environment.m_obstacle_map.emplace(
+            obstacle.from, obstacle.to, obstacle.obstacle);
+    }
+
+    // Maneuver overrides: {u64 count} then per record {u64 node_count,
+    // u32 nodes..., u32 instruction_node, u8 turn_type, u8 direction}.
+    std::vector<UnresolvedManeuverOverride> maneuver_overrides;
+    {
+        storage::io::BufferReader buffer_reader{maneuver_buffer};
+        const auto count = buffer_reader.ReadElementCount64();
+        for (std::uint64_t i = 0; i < count; ++i)
+        {
+            const auto node_count = buffer_reader.ReadElementCount64();
+            std::vector<NodeID> nodes(node_count);
+            for (auto &node : nodes)
+            {
+                buffer_reader.ReadInto(node);
+            }
+            NodeID instruction_node = SPECIAL_NODEID;
+            buffer_reader.ReadInto(instruction_node);
+            std::uint8_t turn_type = 0, direction = 0;
+            buffer_reader.ReadInto(turn_type);
+            buffer_reader.ReadInto(direction);
+
+            UnresolvedManeuverOverride override;
+            if (nodes.size() == 3)
+            {
+                override.turn_path = {ViaNodePath{nodes[0], nodes[1], nodes[2]}};
+            }
+            else if (nodes.size() > 3)
+            {
+                override.turn_path.node_or_way = ViaWayPath{
+                    nodes.front(),
+                    std::vector<NodeID>(nodes.begin() + 1, nodes.end() - 1),
+                    nodes.back()};
+            }
+            else
+            {
+                continue;
+            }
+            override.instruction_node = instruction_node;
+            override.override_type = static_cast<guidance::TurnType::Enum>(turn_type);
+            override.direction = static_cast<guidance::DirectionModifier::Enum>(direction);
+            maneuver_overrides.push_back(std::move(override));
+        }
+    }
+
+    // Reconstruct the turn-lane map by inverting .osrm.tls (ids are stable
+    // append-only, so the final file is a faithful superset of the
+    // parse-time map).
+    LaneDescriptionMap turn_lane_map;
+    {
+        std::vector<std::uint32_t> offsets;
+        std::vector<TurnLaneType::Mask> masks;
+        files::readTurnLaneDescriptions(config.GetPath(".osrm.tls"), offsets, masks);
+        for (std::size_t id = 0; id + 1 < offsets.size(); ++id)
+        {
+            TurnLaneDescription description(masks.begin() + offsets[id],
+                                            masks.begin() + offsets[id + 1]);
+            turn_lane_map.data[description] = static_cast<LaneDescriptionID>(id);
+        }
+    }
+
+    // Profile-global outputs a parse run would have written.
+    ExtractorCallbacks::ClassesMap classes_map;
+    auto profile_properties = scripting_environment.GetProfileProperties();
+    SetClassNames(scripting_environment.GetClassNames(), classes_map, profile_properties);
+    auto excludable_classes = scripting_environment.GetExcludableClasses();
+    SetExcludableClasses(classes_map, excludable_classes, profile_properties);
+    files::writeProfileProperties(config.GetPath(".osrm.properties").string(),
+                                  profile_properties);
+    files::writeTimestamp(config.GetPath(".osrm.timestamp").string(),
+                          config.data_version.empty() ? "n/a" : config.data_version);
+
+    std::vector<util::Coordinate> osm_coordinates;
+    extractor::PackedOSMIDs osm_node_ids;
+    osm_coordinates.resize(used_nodes.size());
+    osm_node_ids.reserve(used_nodes.size());
+    for (size_t index = 0; index < used_nodes.size(); ++index)
+    {
+        const auto &current_node = used_nodes[index];
+        osm_coordinates[index].lon = current_node.lon;
+        osm_coordinates[index].lat = current_node.lat;
+        checkPackedOSMNodeIdFits(current_node.node_id);
+        osm_node_ids.push_back(current_node.node_id);
+    }
+
+    TIMER_STOP(loading);
+    util::Log() << "Loaded " << used_nodes.size() << " nodes, " << used_edges.size()
+                << " edges, " << annotation_data.size() << " annotations, "
+                << turn_restrictions.size() << " turn restrictions, " << obstacles.size()
+                << " obstacles, " << maneuver_overrides.size() << " maneuver overrides in "
+                << TIMER_SEC(loading) << "s";
+
+    return ParsedOSMData{std::move(turn_lane_map),
+                         std::move(turn_restrictions),
+                         std::move(maneuver_overrides),
+                         std::move(osm_coordinates),
+                         std::move(osm_node_ids),
+                         std::move(used_edges),
+                         std::move(annotation_data)};
 }
 
 void Extractor::FindComponents(unsigned number_of_edge_based_nodes,
