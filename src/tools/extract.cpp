@@ -199,7 +199,10 @@ try
         return EXIT_FAILURE;
     }
 
-    if (!std::filesystem::is_regular_file(extractor_config.input_path))
+    // With --load-nbg the input argument is only the .osrm base path; the
+    // dumped files' existence is checked by the loader itself.
+    if (!extractor_config.load_nbg &&
+        !std::filesystem::is_regular_file(extractor_config.input_path))
     {
         util::Log(logERROR) << "Input file " << extractor_config.input_path.string()
                             << " not found!";
