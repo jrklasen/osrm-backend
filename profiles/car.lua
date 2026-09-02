@@ -86,8 +86,7 @@ function setup()
       'vehicle',
       'permissive',
       'designated',
-      'hov',
-      'unknown'
+      'hov'
     },
 
     access_tag_blacklist = Set {
@@ -125,6 +124,7 @@ function setup()
       'customers',
       'permit',
       'residents',
+      'unknown',
     },
 
     access_tags_hierarchy = Sequence {
@@ -273,6 +273,8 @@ function setup()
       stone = 20,
       rocky = 20,
       sand = 20,
+
+      laterite = 15,
 
       mud = 10,
 

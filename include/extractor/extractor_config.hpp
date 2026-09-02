@@ -65,14 +65,16 @@ struct ExtractorConfig final : storage::IOConfig
                ".osrm.icd",
                ".osrm.cnbg",
                ".osrm.cnbg_to_ebg",
-               ".osrm.maneuver_overrides"})
+               ".osrm.maneuver_overrides",
+               // only written when the profile meshes pedestrian areas
+               ".osrm.openareas",
+               ".osrm.openareas.ramIndex",
+               ".osrm.openareas.fileIndex"})
     {
     }
 
     void UseDefaultOutputNames(const std::filesystem::path &base)
-    {
-        IOConfig::UseDefaultOutputNames(base);
-    }
+    { IOConfig::UseDefaultOutputNames(base); }
 
     std::filesystem::path input_path;
     std::filesystem::path profile_path;

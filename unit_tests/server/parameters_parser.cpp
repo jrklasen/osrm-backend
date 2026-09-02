@@ -137,14 +137,11 @@ BOOST_AUTO_TEST_CASE(invalid_table_urls)
 
 BOOST_AUTO_TEST_CASE(valid_route_segment_hint)
 {
-    engine::PhantomNode reference_node;
-    reference_node.input_location =
-        util::Coordinate(util::FloatLongitude{7.432251}, util::FloatLatitude{43.745995});
-    engine::SegmentHint reference_segment_hint{reference_node, 0x1337};
+    // Hints are deprecated; verify that encoding/decoding roundtrip preserves the checksum
+    engine::SegmentHint reference_segment_hint{.data_checksum = 0x1337};
     auto encoded_hint = reference_segment_hint.ToBase64();
     auto seg_hint = engine::SegmentHint::FromBase64(encoded_hint);
-    BOOST_CHECK_EQUAL(seg_hint.phantom.input_location,
-                      reference_segment_hint.phantom.input_location);
+    BOOST_CHECK_EQUAL(seg_hint.data_checksum, reference_segment_hint.data_checksum);
 }
 
 BOOST_AUTO_TEST_CASE(valid_route_urls)
@@ -216,13 +213,9 @@ BOOST_AUTO_TEST_CASE(valid_route_urls)
     CHECK_EQUAL_RANGE(reference_3.coordinates, result_3->coordinates);
     CHECK_EQUAL_RANGE_OF_HINTS(reference_3.hints, result_3->hints);
 
-    engine::PhantomNode phantom_1;
-    phantom_1.input_location = coords_1[0];
-    engine::PhantomNode phantom_2;
-    phantom_2.input_location = coords_1[1];
     std::vector<std::optional<engine::Hint>> hints_4 = {
-        engine::Hint{{engine::SegmentHint{phantom_1, 0x1337}}},
-        engine::Hint{{engine::SegmentHint{phantom_2, 0x1337}}}};
+        engine::Hint{{engine::SegmentHint{.data_checksum = 0x1337}}},
+        engine::Hint{{engine::SegmentHint{.data_checksum = 0x1337}}}};
     RouteParameters reference_4{false,
                                 false,
                                 false,
@@ -335,14 +328,10 @@ BOOST_AUTO_TEST_CASE(valid_route_urls)
                                               {util::FloatLongitude{5}, util::FloatLatitude{6}},
                                               {util::FloatLongitude{7}, util::FloatLatitude{8}}};
 
-    engine::PhantomNode phantom_3;
-    phantom_3.input_location = coords_3[0];
-    engine::PhantomNode phantom_4;
-    phantom_4.input_location = coords_3[2];
     std::vector<std::optional<engine::Hint>> hints_10 = {
-        engine::Hint{{engine::SegmentHint{phantom_3, 0x1337}}},
+        engine::Hint{{engine::SegmentHint{.data_checksum = 0x1337}}},
         {},
-        engine::Hint{{engine::SegmentHint{phantom_4, 0x1337}}},
+        engine::Hint{{engine::SegmentHint{.data_checksum = 0x1337}}},
         {}};
 
     RouteParameters reference_10{false,
@@ -749,6 +738,58 @@ BOOST_AUTO_TEST_CASE(valid_nearest_urls)
     CHECK_EQUAL_RANGE(reference_2.radiuses, result_2->radiuses);
     CHECK_EQUAL_RANGE(reference_2.approaches, result_2->approaches);
     CHECK_EQUAL_RANGE(reference_2.coordinates, result_2->coordinates);
+
+    std::vector<util::Coordinate> coords_2 = {{util::FloatLongitude{1}, util::FloatLatitude{2}},
+                                              {util::FloatLongitude{3}, util::FloatLatitude{4}},
+                                              {util::FloatLongitude{5}, util::FloatLatitude{6}}};
+
+    NearestParameters reference_3{};
+    reference_3.coordinates = coords_2;
+    auto result_3 = parseParameters<NearestParameters>("1,2;3,4;5,6");
+    BOOST_CHECK(result_3);
+    BOOST_CHECK_EQUAL(reference_3.number_of_results, result_3->number_of_results);
+    CHECK_EQUAL_RANGE(reference_3.bearings, result_3->bearings);
+    CHECK_EQUAL_RANGE(reference_3.radiuses, result_3->radiuses);
+    CHECK_EQUAL_RANGE(reference_3.approaches, result_3->approaches);
+    CHECK_EQUAL_RANGE(reference_3.coordinates, result_3->coordinates);
+
+    NearestParameters reference_4{};
+    reference_4.coordinates = coords_2;
+    reference_4.number_of_results = 5;
+    auto result_4 = parseParameters<NearestParameters>("1,2;3,4;5,6?number=5");
+    BOOST_CHECK(result_4);
+    BOOST_CHECK_EQUAL(reference_4.number_of_results, result_4->number_of_results);
+    CHECK_EQUAL_RANGE(reference_4.coordinates, result_4->coordinates);
+
+    std::vector<std::optional<engine::Bearing>> bearings_5 = {
+        std::nullopt, engine::Bearing{200, 10}, engine::Bearing{100, 5}};
+    std::vector<std::optional<double>> radiuses_5 = {
+        std::nullopt, 60.0, std::make_optional(std::numeric_limits<double>::infinity())};
+    std::vector<std::optional<engine::Approach>> approaches_5 = {
+        std::nullopt, engine::Approach::CURB, engine::Approach::UNRESTRICTED};
+
+    NearestParameters reference_5{};
+    reference_5.coordinates = coords_2;
+    reference_5.bearings = bearings_5;
+    reference_5.radiuses = radiuses_5;
+    reference_5.approaches = approaches_5;
+    auto result_5 = parseParameters<NearestParameters>(
+        "1,2;3,4;5,6?bearings=;200,10;100,5&radiuses=;60;unlimited&approaches=;curb;"
+        "unrestricted");
+    BOOST_CHECK(result_5);
+    CHECK_EQUAL_RANGE(reference_5.bearings, result_5->bearings);
+    CHECK_EQUAL_RANGE(reference_5.radiuses, result_5->radiuses);
+    CHECK_EQUAL_RANGE(reference_5.approaches, result_5->approaches);
+    CHECK_EQUAL_RANGE(reference_5.coordinates, result_5->coordinates);
+}
+
+BOOST_AUTO_TEST_CASE(invalid_nearest_urls)
+{
+    BOOST_CHECK_EQUAL(testInvalidOptions<NearestParameters>("1,2?number=foo"), 11UL);
+    BOOST_CHECK_EQUAL(testInvalidOptions<NearestParameters>("1,2?number=-1"), 11UL);
+    BOOST_CHECK_EQUAL(testInvalidOptions<NearestParameters>("1,2;3,4?bearings=foo"), 17UL);
+    BOOST_CHECK_EQUAL(testInvalidOptions<NearestParameters>("1,2;3,4?radiuses=foo"), 17UL);
+    BOOST_CHECK_EQUAL(testInvalidOptions<NearestParameters>("1,2;3,4?approaches=foo"), 19UL);
 }
 
 BOOST_AUTO_TEST_CASE(invalid_tile_urls)
